@@ -447,3 +447,62 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
 
+
+
+# Endpoints para Ordens de Serviço
+@app.route("/ordens-servico", methods=["POST"])
+@token_required
+@permission_required("tecnico")
+def add_ordem_servico(current_user):
+    data = request.json
+    session = Session()
+    new_ordem = OrdemDeServico(
+        equipamento_id=data["equipamento_id"],
+        setor=data["setor"],
+        descricao_problema=data["descricao_problema"],
+        tipo_manutencao=data["tipo_manutencao"],
+        responsavel_id=current_user.id
+    )
+    session.add(new_ordem)
+    session.commit()
+    session.close()
+    return jsonify({"message": "Ordem de serviço adicionada com sucesso!"}), 201
+
+@app.route("/ordens-servico", methods=["GET"])
+@token_required
+def get_ordens_servico(current_user):
+    session = Session()
+    ordens = session.query(OrdemDeServico).all()
+    output = []
+    for o in ordens:
+        output.append({
+            "id": o.id,
+            "equipamento_id": o.equipamento_id,
+            "setor": o.setor,
+            "descricao_problema": o.descricao_problema,
+            "data_abertura": o.data_abertura.isoformat(),
+            "status": o.status,
+            "tipo_manutencao": o.tipo_manutencao
+        })
+    session.close()
+    return jsonify({"ordens_servico": output})
+
+
+# Endpoints para Usuários
+@app.route("/usuarios", methods=["GET"])
+@token_required
+@permission_required("administrador")
+def get_usuarios(current_user):
+    session = Session()
+    usuarios = session.query(Usuario).all()
+    output = []
+    for u in usuarios:
+        output.append({
+            "id": u.id,
+            "nome_usuario": u.nome_usuario,
+            "email": u.email,
+            "permissao": u.permissao
+        })
+    session.close()
+    return jsonify({"usuarios": output})
+
