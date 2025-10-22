@@ -16,8 +16,8 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "supersecretkey_default")
 
 # Configuração do CORS
-CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "http://localhost:5173") # Frontend URL
-CORS(app, resources={r"/*": {"origins": CORS_ORIGIN}})
+CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*") # Permitir qualquer origem para depuração
+CORS(app, resources={r"/*": {"origins": CORS_ORIGIN, "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization", "X-Access-Token"]}})
 
 
 # Inicializar o banco de dados e criar uma sessão
