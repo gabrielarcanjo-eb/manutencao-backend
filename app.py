@@ -51,6 +51,35 @@ def permission_required(permission_level):
         return decorated_function
     return decorator
 
+@app.route("/init-admin", methods=["POST"])
+def init_admin():
+    """Endpoint para criar o primeiro usuário admin. Só funciona se não houver usuários."""
+    session = Session()
+    existing_users = session.query(Usuario).count()
+    session.close()
+    
+    if existing_users > 0:
+        return jsonify({"message": "Já existem usuários no sistema. Use o endpoint /register para criar novos usuários."}), 403
+    
+    data = request.json
+    if not data or not data.get("nome_usuario") or not data.get("senha"):
+        return jsonify({"message": "Nome de usuário e senha são obrigatórios"}), 400
+    
+    hashed_password = generate_password_hash(data["senha"], method="pbkdf2:sha256")
+    
+    session = Session()
+    admin_user = Usuario(
+        nome_usuario=data["nome_usuario"],
+        senha_hash=hashed_password,
+        email=data.get("email", "admin@clinic.com"),
+        permissao="administrador"
+    )
+    session.add(admin_user)
+    session.commit()
+    session.close()
+    
+    return jsonify({"message": "Usuário administrador criado com sucesso!"}), 201
+
 @app.route("/login", methods=["POST"])
 def login_user():
     auth = request.json
