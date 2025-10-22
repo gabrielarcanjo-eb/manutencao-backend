@@ -1,4 +1,3 @@
-
 import os
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
@@ -288,10 +287,7 @@ def get_ordens_servico(current_user):
             "setor": os.setor,
             "descricao_problema": os.descricao_problema,
             "data_abertura": os.data_abertura.isoformat(),
-            "data_fechamento": os.data_fechamento.isoformat() if os.data_fechamento else None,
             "status": os.status,
-            "tipo_manutencao": os.tipo_manutencao,
-            "custo_total": str(os.custo_total),
             "responsavel_id": os.responsavel_id
         })
     session.close()
@@ -303,38 +299,18 @@ def get_ordens_servico(current_user):
 def update_ordem_servico(current_user, os_id):
     data = request.json
     session = Session()
-    os = session.query(OrdemDeServico).filter_by(id=os_id).first()
-    if not os:
+    ordem_servico = session.query(OrdemDeServico).filter_by(id=os_id).first()
+    if not ordem_servico:
         session.close()
         return jsonify({"message": "Ordem de Serviço não encontrada"}), 404
 
-    os.setor = data.get("setor", os.setor)
-    os.descricao_problema = data.get("descricao_problema", os.descricao_problema)
-    if data.get("data_fechamento"):
-        os.data_fechamento = datetime.datetime.strptime(data["data_fechamento"], "%Y-%m-%d %H:%M:%S")
-    os.status = data.get("status", os.status)
-    os.tipo_manutencao = data.get("tipo_manutencao", os.tipo_manutencao)
-    os.custo_total = data.get("custo_total", os.custo_total)
-    os.responsavel_id = data.get("responsavel_id", os.responsavel_id)
+    ordem_servico.status = data.get("status", ordem_servico.status)
+    if data.get("status") == "fechada":
+        ordem_servico.data_fechamento = datetime.datetime.utcnow()
 
     session.commit()
     session.close()
     return jsonify({"message": "Ordem de Serviço atualizada com sucesso!"})
-
-@app.route("/ordens_servico/<int:os_id>", methods=["DELETE"])
-@token_required
-@permission_required("administrador") # Apenas administradores podem deletar OS
-def delete_ordem_servico(current_user, os_id):
-    session = Session()
-    os = session.query(OrdemDeServico).filter_by(id=os_id).first()
-    if not os:
-        session.close()
-        return jsonify({"message": "Ordem de Serviço não encontrada"}), 404
-    
-    session.delete(os)
-    session.commit()
-    session.close()
-    return jsonify({"message": "Ordem de Serviço removida com sucesso!"})
 
 
 # Endpoints para Manutenções
@@ -346,10 +322,9 @@ def add_manutencao(current_user):
     session = Session()
     new_manutencao = Manutencao(
         ordem_servico_id=data["ordem_servico_id"],
-        data_manutencao=datetime.datetime.strptime(data["data_manutencao"], "%Y-%m-%d %H:%M:%S"),
-        descricao=data.get("descricao"),
-        custo=data.get("custo", 0.00),
-        realizada_por=data.get("realizada_por")
+        descricao_servico=data["descricao_servico"],
+        custo=data["custo"],
+        realizada_por=current_user.id
     )
     session.add(new_manutencao)
     session.commit()
@@ -367,50 +342,12 @@ def get_manutencoes(current_user):
             "id": m.id,
             "ordem_servico_id": m.ordem_servico_id,
             "data_manutencao": m.data_manutencao.isoformat(),
-            "descricao": m.descricao,
+            "descricao_servico": m.descricao_servico,
             "custo": str(m.custo),
             "realizada_por": m.realizada_por
         })
     session.close()
     return jsonify({"manutencoes": output})
-
-
-# Endpoints para Documentos de Patrimônio
-@app.route("/documentos_patrimonio", methods=["POST"])
-@token_required
-@permission_required("patrimonio")
-def add_documento_patrimonio(current_user):
-    data = request.json
-    session = Session()
-    new_doc = DocumentoPatrimonio(
-        equipamento_id=data["equipamento_id"],
-        nome_documento=data["nome_documento"],
-        caminho_arquivo=data["caminho_arquivo"],
-        tipo_documento=data.get("tipo_documento")
-    )
-    session.add(new_doc)
-    session.commit()
-    session.close()
-    return jsonify({"message": "Documento de patrimônio adicionado com sucesso!"}), 201
-
-@app.route("/documentos_patrimonio", methods=["GET"])
-@token_required
-def get_documentos_patrimonio(current_user):
-    session = Session()
-    documentos = session.query(DocumentoPatrimonio).all()
-    output = []
-    for d in documentos:
-        output.append({
-            "id": d.id,
-            "equipamento_id": d.equipamento_id,
-            "nome_documento": d.nome_documento,
-            "caminho_arquivo": d.caminho_arquivo,
-            "data_upload": d.data_upload.isoformat(),
-            "tipo_documento": d.tipo_documento
-        })
-    session.close()
-    return jsonify({"documentos_patrimonio": output})
-
 
 # Endpoint para indicadores de obsolescência (exemplo simplificado)
 @app.route("/equipamentos/<int:equipamento_id>/obsolescencia", methods=["GET"])
@@ -477,59 +414,7 @@ def get_indicadores(current_user):
         "ordens_servico_fechadas": ordens_servico_fechadas
     })
 
-
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
-
-
-
-from flask_cors import CORS
-
-CORS(app)
-
-
-
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
-
-
-# Endpoints para Documentos de Patrimônio
-@app.route("/documentos_patrimonio", methods=["POST"])
-@token_required
-@permission_required("administrador")
-def add_documento_patrimonio(current_user):
-    data = request.json
-    session = Session()
-    new_documento = DocumentoPatrimonio(
-        equipamento_id=data["equipamento_id"],
-        nome_documento=data["nome_documento"],
-        caminho_arquivo=data["caminho_arquivo"],
-        tipo_documento=data.get("tipo_documento")
-    )
-    session.add(new_documento)
-    session.commit()
-    session.close()
-    return jsonify({"message": "Documento de patrimônio adicionado com sucesso!"}), 201
-
-@app.route("/documentos_patrimonio", methods=["GET"])
-@token_required
-@permission_required("administrador")
-def get_documentos_patrimonio(current_user):
-    session = Session()
-    documentos = session.query(DocumentoPatrimonio).all()
-    output = []
-    for doc in documentos:
-        output.append({
-            "id": doc.id,
-            "equipamento_id": doc.equipamento_id,
-            "nome_documento": doc.nome_documento,
-            "caminho_arquivo": doc.caminho_arquivo,
-            "tipo_documento": doc.tipo_documento,
-            "data_upload": doc.data_upload.isoformat()
-        })
-    session.close()
-    return jsonify({"documentos_patrimonio": output})
 
