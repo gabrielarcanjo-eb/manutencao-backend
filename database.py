@@ -27,7 +27,7 @@ class Equipamento(Base):
     valor_compra = Column(DECIMAL(10, 2), nullable=False)
     data_compra = Column(Date, nullable=False)
     data_garantia_fim = Column(Date)
-    tipo_posse = Column(Enum('comodato', 'proprio'), nullable=False)
+    tipo_posse = Column(Enum('comodato', 'proprio', name='tipo_posse_enum'), nullable=False)
     numero_identificacao = Column(String(255), unique=True, nullable=False)
     ativo = Column(Boolean, default=True)
     valor_atual = Column(DECIMAL(10, 2))
@@ -43,7 +43,7 @@ class Usuario(Base):
     nome_usuario = Column(String(255), unique=True, nullable=False)
     senha_hash = Column(String(255), nullable=False)
     email = Column(String(255), unique=True)
-    permissao = Column(Enum('administrador', 'patrimonio', 'tecnico', 'visualizador'), default='visualizador')
+    permissao = Column(Enum('administrador', 'patrimonio', 'tecnico', 'visualizador', name='permissao_enum'), default='visualizador')
 
     ordens_servico_responsavel = relationship('OrdemDeServico', back_populates='responsavel')
 
@@ -55,8 +55,8 @@ class OrdemDeServico(Base):
     descricao_problema = Column(String, nullable=False)
     data_abertura = Column(DateTime, default=datetime.now)
     data_fechamento = Column(DateTime)
-    status = Column(Enum('aberta', 'em_andamento', 'fechada', 'cancelada'), default='aberta')
-    tipo_manutencao = Column(Enum('corretiva', 'programada'), nullable=False)
+    status = Column(Enum('aberta', 'em_andamento', 'fechada', 'cancelada', name='status_enum'), default='aberta')
+    tipo_manutencao = Column(Enum('corretiva', 'programada', name='tipo_manutencao_enum'), nullable=False)
     custo_total = Column(DECIMAL(10, 2), default=0.00)
     responsavel_id = Column(Integer, ForeignKey('usuarios.id'))
 
