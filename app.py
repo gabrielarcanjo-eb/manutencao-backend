@@ -283,172 +283,6 @@ def delete_fornecedor(current_user, fornecedor_id):
     session.close()
     return jsonify({"message": "Fornecedor removido com sucesso!"})
 
-
-# Endpoints para Ordens de Serviço
-@app.route("/ordens_servico", methods=["POST"])
-@token_required
-@permission_required("tecnico")
-def add_ordem_servico(current_user):
-    data = request.json
-    session = Session()
-    new_os = OrdemDeServico(
-        equipamento_id=data["equipamento_id"],
-        setor=data["setor"],
-        descricao_problema=data["descricao_problema"],
-        tipo_manutencao=data["tipo_manutencao"],
-        responsavel_id=current_user.id # O usuário logado é o responsável
-    )
-    session.add(new_os)
-    session.commit()
-    session.close()
-    return jsonify({"message": "Ordem de Serviço criada com sucesso!"}), 201
-
-@app.route("/ordens_servico", methods=["GET"])
-@token_required
-def get_ordens_servico(current_user):
-    session = Session()
-    ordens_servico = session.query(OrdemDeServico).all()
-    output = []
-    for os in ordens_servico:
-        output.append({
-            "id": os.id,
-            "equipamento_id": os.equipamento_id,
-            "setor": os.setor,
-            "descricao_problema": os.descricao_problema,
-            "data_abertura": os.data_abertura.isoformat(),
-            "status": os.status,
-            "responsavel_id": os.responsavel_id
-        })
-    session.close()
-    return jsonify({"ordens_servico": output})
-
-@app.route("/ordens_servico/<int:os_id>", methods=["PUT"])
-@token_required
-@permission_required("tecnico")
-def update_ordem_servico(current_user, os_id):
-    data = request.json
-    session = Session()
-    ordem_servico = session.query(OrdemDeServico).filter_by(id=os_id).first()
-    if not ordem_servico:
-        session.close()
-        return jsonify({"message": "Ordem de Serviço não encontrada"}), 404
-
-    ordem_servico.status = data.get("status", ordem_servico.status)
-    if data.get("status") == "fechada":
-        ordem_servico.data_fechamento = datetime.datetime.utcnow()
-
-    session.commit()
-    session.close()
-    return jsonify({"message": "Ordem de Serviço atualizada com sucesso!"})
-
-
-# Endpoints para Manutenções
-@app.route("/manutencoes", methods=["POST"])
-@token_required
-@permission_required("tecnico")
-def add_manutencao(current_user):
-    data = request.json
-    session = Session()
-    new_manutencao = Manutencao(
-        ordem_servico_id=data["ordem_servico_id"],
-        descricao_servico=data["descricao_servico"],
-        custo=data["custo"],
-        realizada_por=current_user.id
-    )
-    session.add(new_manutencao)
-    session.commit()
-    session.close()
-    return jsonify({"message": "Manutenção adicionada com sucesso!"}), 201
-
-@app.route("/manutencoes", methods=["GET"])
-@token_required
-def get_manutencoes(current_user):
-    session = Session()
-    manutencoes = session.query(Manutencao).all()
-    output = []
-    for m in manutencoes:
-        output.append({
-            "id": m.id,
-            "ordem_servico_id": m.ordem_servico_id,
-            "data_manutencao": m.data_manutencao.isoformat(),
-            "descricao_servico": m.descricao_servico,
-            "custo": str(m.custo),
-            "realizada_por": m.realizada_por
-        })
-    session.close()
-    return jsonify({"manutencoes": output})
-
-# Endpoint para indicadores de obsolescência (exemplo simplificado)
-@app.route("/equipamentos/<int:equipamento_id>/obsolescencia", methods=["GET"])
-@token_required
-def get_obsolescencia(current_user, equipamento_id):
-    session = Session()
-    equipamento = session.query(Equipamento).filter_by(id=equipamento_id).first()
-    if not equipamento:
-        session.close()
-        return jsonify({"message": "Equipamento não encontrado"}), 404
-    
-    manutencoes_count = session.query(Manutencao).join(OrdemDeServico).filter(OrdemDeServico.equipamento_id == equipamento_id).count()
-    
-    session.close()
-
-    # Lógica simplificada para cálculo de obsolescência
-    # Pode ser mais complexa com base em idade, valor de mercado, etc.
-    obsolescencia_score = 0
-    if equipamento.valor_atual and equipamento.valor_compra:
-        if equipamento.valor_atual < (equipamento.valor_compra * 0.5):
-            obsolescencia_score += 1
-    
-    if manutencoes_count > 5: # Mais de 5 manutenções indicam alta obsolescência
-        obsolescencia_score += 1
-
-    return jsonify({
-        "equipamento_id": equipamento.id,
-        "nome": equipamento.nome,
-        "valor_atual": str(equipamento.valor_atual) if equipamento.valor_atual else "N/A",
-        "total_reparos": str(equipamento.total_reparos),
-        "manutencoes_realizadas": manutencoes_count,
-        "obsolescencia_score": obsolescencia_score,
-        "status_obsolescencia": "Alto" if obsolescencia_score >= 2 else ("Médio" if obsolescencia_score == 1 else "Baixo")
-    })
-
-
-# Endpoint para indicadores de eficiência (exemplo simplificado)
-@app.route("/indicadores", methods=["GET"])
-@token_required
-def get_indicadores(current_user):
-    session = Session()
-    
-    equipamentos_adquiridos = session.query(Equipamento).count()
-    equipamentos_ativos = session.query(Equipamento).filter_by(ativo=True).count()
-    
-    manutencoes_corretivas = session.query(Manutencao).join(OrdemDeServico).filter(OrdemDeServico.tipo_manutencao == 'corretiva').count()
-    manutencoes_programadas = session.query(Manutencao).join(OrdemDeServico).filter(OrdemDeServico.tipo_manutencao == 'programada').count()
-    
-    ordens_servico_abertas = session.query(OrdemDeServico).filter(OrdemDeServico.status.in_(['aberta', 'em_andamento'])).count()
-    ordens_servico_fechadas = session.query(OrdemDeServico).filter_by(status='fechada').count()
-
-    # Índice de quebra: (COUNT de OS tipo 'corretiva' / COUNT de Equipamentos ativos) * 100
-    indice_quebra = (manutencoes_corretivas / equipamentos_ativos * 100) if equipamentos_ativos > 0 else 0
-
-    session.close()
-
-    return jsonify({
-        "equipamentos_adquiridos": equipamentos_adquiridos,
-        "equipamentos_ativos": equipamentos_ativos,
-        "indice_quebra": round(indice_quebra, 2),
-        "manutencoes_corretivas": manutencoes_corretivas,
-        "manutencoes_programadas": manutencoes_programadas,
-        "ordens_servico_abertas": ordens_servico_abertas,
-        "ordens_servico_fechadas": ordens_servico_fechadas
-    })
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-
-
-
 # Endpoints para Ordens de Serviço
 @app.route("/ordens-servico", methods=["POST"])
 @token_required
@@ -487,6 +321,27 @@ def get_ordens_servico(current_user):
     session.close()
     return jsonify({"ordens_servico": output})
 
+@app.route("/ordens-servico/<int:ordem_id>", methods=["PUT"])
+@token_required
+@permission_required("tecnico")
+def update_ordem_servico(current_user, ordem_id):
+    data = request.json
+    session = Session()
+    ordem_servico = session.query(OrdemDeServico).filter_by(id=ordem_id).first()
+    if not ordem_servico:
+        session.close()
+        return jsonify({"message": "Ordem de Serviço não encontrada"}), 404
+
+    ordem_servico.setor = data.get("setor", ordem_servico.setor)
+    ordem_servico.descricao_problema = data.get("descricao_problema", ordem_servico.descricao_problema)
+    ordem_servico.status = data.get("status", ordem_servico.status)
+    if data.get("status") == "fechada":
+        ordem_servico.data_fechamento = datetime.datetime.utcnow()
+
+    session.commit()
+    session.close()
+    return jsonify({"message": "Ordem de Serviço atualizada com sucesso!"})
+
 
 # Endpoints para Usuários
 @app.route("/usuarios", methods=["GET"])
@@ -505,4 +360,8 @@ def get_usuarios(current_user):
         })
     session.close()
     return jsonify({"usuarios": output})
+
+if __name__ == "__main__":
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
 
