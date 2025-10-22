@@ -101,10 +101,10 @@ def login_user():
 
     return jsonify({"token": token, "permissao": user.permissao})
 
-@app.route("/register", methods=["POST"])
+@app.route("/usuarios", methods=["POST"])
 @token_required
 @permission_required("administrador")
-def register_user(current_user):
+def create_user(current_user):
     data = request.json
     hashed_password = generate_password_hash(data["senha"], method="pbkdf2:sha256")
     
@@ -118,7 +118,7 @@ def register_user(current_user):
     session.add(new_user)
     session.commit()
     session.close()
-    return jsonify({"message": "Usuário registrado com sucesso!"}), 201
+    return jsonify({"message": "Usuário criado com sucesso!"}), 201
 
 # Endpoints para Equipamentos
 @app.route("/equipamentos", methods=["POST"])
