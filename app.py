@@ -8,6 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import jwt
 import datetime
+from sqlalchemy import func
 
 load_dotenv()
 
@@ -35,7 +36,7 @@ def token_required(f):
             data = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
             session = Session()
             current_user = session.query(Usuario).filter_by(id=data["user_id"]).first()
-            session.close()
+    session.close()
         except:
             return jsonify({"message": "Token é inválido!"}), 401
         return f(current_user, *args, **kwargs)
@@ -137,7 +138,10 @@ def add_equipamento(current_user):
         tipo_posse=data["tipo_posse"],
         numero_identificacao=data["numero_identificacao"],
         valor_atual=data.get("valor_atual"),
-        total_reparos=data.get("total_reparos", 0.00)
+        total_reparos=data.get("total_reparos", 0.00),
+        status_operacional=data.get("status_operacional", "Operacional"),
+        tipo_equipamento=data.get("tipo_equipamento"),
+        vida_util_anos=data.get("vida_util_anos")
     )
     session.add(new_equipamento)
     session.commit()
@@ -163,7 +167,11 @@ def get_equipamentos(current_user):
             "numero_identificacao": eq.numero_identificacao,
             "ativo": eq.ativo,
             "valor_atual": str(eq.valor_atual) if eq.valor_atual else None,
-            "total_reparos": str(eq.total_reparos)
+            "total_reparos": str(eq.total_reparos),
+            "status_operacional": eq.status_operacional,
+            "tipo_equipamento": eq.tipo_equipamento,
+            "vida_util_anos": eq.vida_util_anos,
+            "manutencoes_agendadas": [{"data_agendada": m.data_agendada.isoformat(), "tipo_manutencao": m.tipo_manutencao} for m in eq.manutencoes_agendadas]
         })
     session.close()
     return jsonify({"equipamentos": output})
@@ -192,6 +200,9 @@ def update_equipamento(current_user, equipamento_id):
     equipamento.ativo = data.get("ativo", equipamento.ativo)
     equipamento.valor_atual = data.get("valor_atual", equipamento.valor_atual)
     equipamento.total_reparos = data.get("total_reparos", equipamento.total_reparos)
+    equipamento.status_operacional = data.get("status_operacional", equipamento.status_operacional)
+    equipamento.tipo_equipamento = data.get("tipo_equipamento", equipamento.tipo_equipamento)
+    equipamento.vida_util_anos = data.get("vida_util_anos", equipamento.vida_util_anos)
 
     session.commit()
     session.close()
@@ -209,9 +220,85 @@ def delete_equipamento(current_user, equipamento_id):
     
     session.delete(equipamento)
     session.commit()
-    session.close()
+	            session.close()
     return jsonify({"message": "Equipamento removido com sucesso!"})
 
+@app.route("/equipamentos/dashboard", methods=["GET"])
+@token_required
+def get_equipamentos_dashboard(current_user):
+    session = Session()
+    
+    # 1. Equipamentos parados (status 'Fora de Operação/Backup' ou 'Descartado/Baixado')
+    equipamentos_parados = session.query(Equipamento).filter(
+        Equipamento.status_operacional.in_(['Fora de Operação/Backup', 'Descartado/Baixado'])
+    ).count()
+
+    # 2. Equipamentos ativos (status 'Operacional')
+    equipamentos_ativos = session.query(Equipamento).filter(
+        Equipamento.status_operacional == 'Operacional'
+    ).count()
+
+    # 3. Anos desde data de aquisição dividido em intervalos (Ex: 0-1, 1-3, 3-5, >5)
+    # Aqui, por simplicidade, vamos calcular a idade em anos
+    equipamentos = session.query(Equipamento.data_compra).all()
+    hoje = datetime.date.today()
+    intervalos_idade = {"0-1 ano": 0, "1-3 anos": 0, "3-5 anos": 0, ">5 anos": 0}
+    
+    for eq_data_compra in equipamentos:
+        idade_anos = (hoje - eq_data_compra[0]).days // 365
+        if idade_anos <= 1:
+            intervalos_idade["0-1 ano"] += 1
+        elif idade_anos <= 3:
+            intervalos_idade["1-3 anos"] += 1
+        elif idade_anos <= 5:
+            intervalos_idade["3-5 anos"] += 1
+        else:
+            intervalos_idade[">5 anos"] += 1
+
+    # 4. Tipo de equipamento (contagem por tipo)
+    tipos_equipamento = session.query(Equipamento.tipo_equipamento, func.count(Equipamento.tipo_equipamento)).group_by(Equipamento.tipo_equipamento).all()
+    tipos_equipamento_dict = {tipo: count for tipo, count in tipos_equipamento}
+
+    # 5. Manutenções Preventivas Próximas (próximos 30 dias)
+    manutencoes_proximas = session.query(ManutencaoAgendada).filter(
+        ManutencaoAgendada.data_agendada <= hoje + datetime.timedelta(days=30),
+        ManutencaoAgendada.data_agendada >= hoje,
+        ManutencaoAgendada.tipo_manutencao == 'preventiva'
+    ).count()
+
+    # 6. Top 5 Equipamentos com Mais Falhas (quantidades de Ordens de Serviço abertas por equipamento)
+    from sqlalchemy import func
+    top_falhas = session.query(
+        Equipamento.nome, func.count(OrdemDeServico.id).label('total_os')
+    ).join(OrdemDeServico).group_by(Equipamento.nome).order_by(func.count(OrdemDeServico.id).desc()).limit(5).all()
+    
+    top_falhas_list = [{"nome": nome, "total_os": total_os} for nome, total_os in top_falhas]
+
+    # 7. Equipamentos Próximos do Fim da Vida Útil (ex: 80% da vida útil atingida)
+    equipamentos_vida_util = session.query(Equipamento).filter(Equipamento.vida_util_anos.isnot(None)).all()
+    proximos_fim_vida_util = []
+    
+    for eq in equipamentos_vida_util:
+        idade_anos = (hoje - eq.data_compra).days / 365.25
+        if eq.vida_util_anos and idade_anos / eq.vida_util_anos >= 0.8:
+            proximos_fim_vida_util.append({
+                "nome": eq.nome,
+                "idade_anos": round(idade_anos, 2),
+                "vida_util_anos": eq.vida_util_anos,
+                "porcentagem_vida_util": round((idade_anos / eq.vida_util_anos) * 100, 2)
+            })
+
+    session.close()
+    
+    return jsonify({
+        "equipamentos_parados": equipamentos_parados,
+        "equipamentos_ativos": equipamentos_ativos,
+        "intervalos_idade": intervalos_idade,
+        "tipos_equipamento": tipos_equipamento_dict,
+        "manutencoes_preventivas_proximas": manutencoes_proximas,
+        "top_5_falhas": top_falhas_list,
+        "proximos_fim_vida_util": proximos_fim_vida_util
+    })
 
 # Endpoints para Fornecedores
 @app.route("/fornecedores", methods=["POST"])
@@ -286,8 +373,7 @@ def delete_fornecedor(current_user, fornecedor_id):
 # Endpoints para Ordens de Serviço
 @app.route("/ordens-servico", methods=["POST"])
 @token_required
-@permission_required("tecnico")
-def add_ordem_servico(current_user):
+def add_ordem_servico(current_user): # Qualquer usuário pode abrir OS
     data = request.json
     session = Session()
     new_ordem = OrdemDeServico(
@@ -295,7 +381,9 @@ def add_ordem_servico(current_user):
         setor=data["setor"],
         descricao_problema=data["descricao_problema"],
         tipo_manutencao=data["tipo_manutencao"],
-        responsavel_id=current_user.id
+        responsavel_id=current_user.id, # Quem abriu a OS
+        responsavel_tecnico_id=data.get("responsavel_tecnico_id"), # Quem foi designado pelo engenheiro clínico
+        prazo_resolucao=datetime.datetime.strptime(data["prazo_resolucao"], "%Y-%m-%d").date() if data.get("prazo_resolucao") else None
     )
     session.add(new_ordem)
     session.commit()
@@ -315,8 +403,14 @@ def get_ordens_servico(current_user):
             "setor": o.setor,
             "descricao_problema": o.descricao_problema,
             "data_abertura": o.data_abertura.isoformat(),
+            "data_fechamento": o.data_fechamento.isoformat() if o.data_fechamento else None,
             "status": o.status,
-            "tipo_manutencao": o.tipo_manutencao
+            "status_fechamento": o.status_fechamento,
+            "tipo_manutencao": o.tipo_manutencao,
+            "responsavel_tecnico_id": o.responsavel_tecnico_id,
+            "prazo_resolucao": o.prazo_resolucao.isoformat() if o.prazo_resolucao else None,
+            "equipamento_nome": o.equipamento.nome,
+            "responsavel_nome": o.responsavel.nome_usuario
         })
     session.close()
     return jsonify({"ordens_servico": output})
@@ -332,11 +426,21 @@ def update_ordem_servico(current_user, ordem_id):
         session.close()
         return jsonify({"message": "Ordem de Serviço não encontrada"}), 404
 
+    # Regra de negócio: Apenas administrador ou engenheiro clínico (que é o 'patrimônio' na nossa permissão) pode fechar a OS
+    if data.get("status_fechamento") == "fechada" and current_user.permissao not in ['administrador', 'patrimonio']:
+        return jsonify({"message": "Permissão insuficiente. Apenas administradores ou engenheiros clínicos podem fechar Ordens de Serviço."}), 403
+
     ordem_servico.setor = data.get("setor", ordem_servico.setor)
     ordem_servico.descricao_problema = data.get("descricao_problema", ordem_servico.descricao_problema)
     ordem_servico.status = data.get("status", ordem_servico.status)
-    if data.get("status") == "fechada":
+    ordem_servico.responsavel_tecnico_id = data.get("responsavel_tecnico_id", ordem_servico.responsavel_tecnico_id)
+    if data.get("prazo_resolucao"):
+        ordem_servico.prazo_resolucao = datetime.datetime.strptime(data["prazo_resolucao"], "%Y-%m-%d").date()
+    
+    if data.get("status_fechamento") == "fechada" and ordem_servico.status_fechamento != "fechada":
         ordem_servico.data_fechamento = datetime.datetime.utcnow()
+    
+    ordem_servico.status_fechamento = data.get("status_fechamento", ordem_servico.status_fechamento)
 
     session.commit()
     session.close()
@@ -344,6 +448,71 @@ def update_ordem_servico(current_user, ordem_id):
 
 
 # Endpoints para Usuários
+@app.route("/ordens-servico/dashboard", methods=["GET"])
+@token_required
+def get_ordens_servico_dashboard(current_user):
+    session = Session()
+    
+    # 1. Ordens de Serviço abertas por equipamento
+    os_por_equipamento = session.query(
+        Equipamento.nome, func.count(OrdemDeServico.id).label('total_os')
+    ).join(OrdemDeServico).filter(OrdemDeServico.status_fechamento != 'fechada').group_by(Equipamento.nome).all()
+    os_por_equipamento_list = [{"equipamento": nome, "total_os": total_os} for nome, total_os in os_por_equipamento]
+    
+    # 2. Tempo de fechamento de ordem de serviço (média)
+    # Apenas OS fechadas
+    os_fechadas = session.query(OrdemDeServico).filter(OrdemDeServico.status_fechamento == 'fechada', OrdemDeServico.data_fechamento.isnot(None)).all()
+    
+    tempo_total_fechamento = datetime.timedelta()
+    for os in os_fechadas:
+        tempo_total_fechamento += os.data_fechamento - os.data_abertura
+
+    media_tempo_fechamento = str(tempo_total_fechamento / len(os_fechadas)) if os_fechadas else "N/A"
+
+    # 3. Tipo de ordem de serviço aberta (contagem por tipo)
+    os_por_tipo = session.query(
+        OrdemDeServico.tipo_manutencao, func.count(OrdemDeServico.id).label('total_os')
+    ).filter(OrdemDeServico.status_fechamento != 'fechada').group_by(OrdemDeServico.tipo_manutencao).all()
+    os_por_tipo_dict = {tipo: count for tipo, count in os_por_tipo}
+
+    # 4. Quantidade de ordem de serviço por responsável técnico
+    os_por_responsavel = session.query(
+        Usuario.nome_usuario, func.count(OrdemDeServico.id).label('total_os')
+    ).join(OrdemDeServico, Usuario.id == OrdemDeServico.responsavel_tecnico_id).group_by(Usuario.nome_usuario).all()
+    os_por_responsavel_list = [{"responsavel": nome, "total_os": total_os} for nome, total_os in os_por_responsavel]
+
+    # 5. Ordens de serviço atrasadas (prazo_resolucao < hoje e status_fechamento != 'fechada')
+    hoje = datetime.date.today()
+    os_atrasadas = session.query(OrdemDeServico).filter(
+        OrdemDeServico.prazo_resolucao < hoje,
+        OrdemDeServico.status_fechamento != 'fechada'
+    ).count()
+
+    # 6. Últimas ordens de serviço (as 5 mais recentes)
+    ultimas_os = session.query(OrdemDeServico).order_by(OrdemDeServico.data_abertura.desc()).limit(5).all()
+    ultimas_os_list = [{
+        "id": o.id,
+        "equipamento": o.equipamento.nome,
+        "status": o.status_fechamento,
+        "data_abertura": o.data_abertura.isoformat()
+    } for o in ultimas_os]
+
+    # 7. Ordens de serviço fechadas (contagem total)
+    os_fechadas_count = len(os_fechadas)
+
+    session.close()
+    
+    return jsonify({
+        "os_por_equipamento": os_por_equipamento_list,
+        "media_tempo_fechamento": media_tempo_fechamento,
+        "os_por_tipo": os_por_tipo_dict,
+        "os_por_responsavel": os_por_responsavel_list,
+        "os_atrasadas": os_atrasadas,
+        "ultimas_os": ultimas_os_list,
+        "os_fechadas_count": os_fechadas_count
+    })
+
+
 @app.route("/usuarios", methods=["GET"])
 @token_required
 @permission_required("administrador")
