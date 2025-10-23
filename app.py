@@ -36,7 +36,7 @@ def token_required(f):
             data = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
             session = Session()
             current_user = session.query(Usuario).filter_by(id=data["user_id"]).first()
-            session.close()
+    session.close()
         except:
             return jsonify({"message": "Token é inválido!"}), 401
         return f(current_user, *args, **kwargs)
