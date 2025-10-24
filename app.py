@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, joinedload
 from sqlalchemy import func
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -10,6 +10,7 @@ import jwt
 import datetime
 
 from database import (
+    ManutencaoAgendada,
     init_db,
     Base,
     Equipamento,
@@ -199,7 +200,7 @@ def add_equipamento(current_user):
 @token_required
 def get_equipamentos(current_user):
     session = Session()
-    equipamentos = session.query(Equipamento).all()
+    equipamentos = session.query(Equipamento).options(joinedload(Equipamento.manutencoes_agendadas)).all()
     output = []
     for eq in equipamentos:
         output.append({
