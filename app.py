@@ -200,7 +200,7 @@ def add_equipamento(current_user):
 @token_required
 def get_equipamentos(current_user):
     session = Session()
-    equipamentos = session.query(Equipamento).options(joinedload(Equipamento.manutencoes_agendadas)).all()
+    equipamentos = session.query(Equipamento).options(joinedload(Equipamento.manutencoes_agendadas), joinedload(Equipamento.fornecedor)).all()
     output = []
     for eq in equipamentos:
         output.append({
@@ -208,6 +208,7 @@ def get_equipamentos(current_user):
             "nome": eq.nome,
             "marca": eq.marca,
             "fornecedor_id": eq.fornecedor_id,
+            "fornecedor_nome": eq.fornecedor.nome if eq.fornecedor else None,
             "valor_compra": str(eq.valor_compra),
             "data_compra": eq.data_compra.isoformat() if eq.data_compra else None,
             "data_garantia_fim": eq.data_garantia_fim.isoformat() if eq.data_garantia_fim else None,
@@ -293,7 +294,7 @@ def add_ordem_servico(current_user):
 @token_required
 def get_ordens_servico(current_user):
     session = Session()
-    ordens = session.query(OrdemDeServico).options(joinedload(OrdemDeServico.equipamento), joinedload(OrdemDeServico.responsavel)).all()
+    ordens = session.query(OrdemDeServico).options(joinedload(OrdemDeServico.equipamento), joinedload(OrdemDeServico.responsavel), joinedload(OrdemDeServico.responsavel_tecnico)).all()
     output = []
     for o in ordens:
         output.append({
@@ -307,6 +308,7 @@ def get_ordens_servico(current_user):
             "status_fechamento": o.status_fechamento,
             "tipo_manutencao": o.tipo_manutencao,
             "responsavel_tecnico_id": o.responsavel_tecnico_id,
+            "responsavel_tecnico_nome": o.responsavel_tecnico.nome_usuario if o.responsavel_tecnico else None,
             "prazo_resolucao": o.prazo_resolucao.isoformat() if o.prazo_resolucao else None,
             "equipamento_nome": o.equipamento.nome if o.equipamento else None,
             "responsavel_nome": o.responsavel.nome_usuario if o.responsavel else None
