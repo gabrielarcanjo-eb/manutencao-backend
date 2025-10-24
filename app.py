@@ -293,7 +293,7 @@ def add_ordem_servico(current_user):
 @token_required
 def get_ordens_servico(current_user):
     session = Session()
-    ordens = session.query(OrdemDeServico).all()
+    ordens = session.query(OrdemDeServico).options(joinedload(OrdemDeServico.equipamento), joinedload(OrdemDeServico.responsavel)).all()
     output = []
     for o in ordens:
         output.append({
