@@ -308,8 +308,8 @@ def get_ordens_servico(current_user):
             "tipo_manutencao": o.tipo_manutencao,
             "responsavel_tecnico_id": o.responsavel_tecnico_id,
             "prazo_resolucao": o.prazo_resolucao.isoformat() if o.prazo_resolucao else None,
-            "equipamento_nome": o.equipamento.nome,
-            "responsavel_nome": o.responsavel.nome_usuario
+            "equipamento_nome": o.equipamento.nome if o.equipamento else None,
+            "responsavel_nome": o.responsavel.nome_usuario if o.responsavel else None
         })
     session.close()
     return jsonify({"ordens_servico": output})
